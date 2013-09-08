@@ -235,7 +235,7 @@ sub getFree {
                 my $ip = ip_bintoip(ip_inttobin($int, $version),$version);
                 # We need it to be an Net::IP object to be able to get the size
                 my $t_netip = Net::IP->new("$ip/$mask");
-                my $addresses = $self->{ipam}->getAddresses({vrf => $v->{name}, section => $s->{name}, subnet => "$ip/$mask"});
+                my $addresses = $self->{ipam}->getAddresses({vrf => $v->{name}, section => $s->{name}, subnet => "$ip/$mask", strict => 1});
                 my $f = $t_netip->size() - @{$addresses} - 2;
                 $free->{$v_name}->{$s->{name}}->{"$ip/$mask"} = $f;
             }
@@ -293,22 +293,120 @@ sub getDHCP {
     return undef;
 }
 
-=head2 getNoDNS($section, $subnet)
+=head2 getNoDNS(%opts)
 
-Get all IP addresses within a section or subnet that does not have a DNS name
+Get all IP addresses within a VRF, section or subnet that does not have a DNS name
 associated with it.
-By default returns all addresses in all sections and subnets if no options are given.
+By default returns all addresses in all VRFs, sections and subnets if no options are given.
 
     $reporter->getNoDNS("servers", "10.0.0.0/8");
+
+%options limit the scope for which addresses are searched, options are
+
+    section => string           - Section name as stored in the database.
+                                  Section names are case sensitive.
+
+    subnet => CIDR              - IPv4 or IPv6 CIDR as stored in the database.
+                                  NOTE: phpipam does not do any calculations
+                                  on subnets, a subnet must exactly match what's in
+                                  the database.
+
+    vrf => [name|RD]            - Name or Route-Distinguisher of the VRF to search in.
+
+By default getNoDNS will return all addresses in all subnets that does not
+have any DNS name associated with it.
+
+    my $free = $reporter->getNoDNS({section => "Section1", subnet => "192.168.0.0/24"});
+
+getNoDNS() will sort the subnets in VRF and Sections so you know what subnet you're
+currently looking at.
+An example structure will look something like this
+
+    $VAR1 = {
+          'TestVRF' => {
+                         'SectionA' => {
+                                      '192.168.0.0/24' => [
+                                                            '192.168.0.1'
+                                                          ]
+                                    }
+                       },
+          'GLOBAL' => {
+                        'SectionB' => {
+                                          '172.20.1.0/24' => [
+                                                               '172.20.1.10',
+                                                               '172.20.1.11'
+                                                             ],
+                                        }
+                      }
+            };
+
+Note that subnets that do not belong to any VRFs are automatically put in the GLOBAL vrf.
+
 =cut
 sub getNoDNS {
     my $self = shift;
-    my $section = shift;
-    my $subnet = shift;
+    my $opts = shift;
+    my $section = $opts->{'section'} ||= undef;
+    my $vrf = $opts->{'vrf'} ||= undef;
+    my $subnet = $opts->{'subnet'} ||= undef;
+    my $netip = undef;
+    my $ipam_vrf = undef;
+    my $ipam_section = undef;
+    my $ret = {};
 
+    if($subnet) {
+        $netip = Net::IP->new($subnet);
+        if(not $netip) {
+            carp ("$netip is not a valid subnet");
+            return undef;
+        }
+    }
 
+    if(not $vrf) {
+        $ipam_vrf = $self->{ipam}->getAllVrfs();
+        unshift(@{$ipam_vrf}, undef);
+    }else {
+        $ipam_vrf = $self->{ipam}->getVrf($vrf);
+        if(not $ipam_vrf) {
+            return undef;
+        }
+    }
 
-    return undef;
+    if(not $section) {
+        $ipam_section = $self->{ipam}->getAllSections();
+        # unshift(@{$ipam_section}, undef);
+    }else {
+        $ipam_section = $self->{ipam}->getSection($section);
+        if(not $ipam_section) {
+            return undef;
+        }
+    }
+
+    foreach my $v (@{$ipam_vrf}) {
+        my $v_name = $v->{name} ? $v->{name} : 'GLOBAL';
+        foreach my $s (@{$ipam_section}) {
+            my $subnets = $self->{ipam}->getSubnets({vrf => $v->{name}, section => $s->{name}});
+            foreach my $snet (@{$subnets}) {
+                # Turn that magical integer into a real subnet that we can work with.
+                my $int = $snet->{subnet};
+                my $mask = $snet->{mask};
+                my $version = length($int) > 10 ? 6 : 4;
+                my $ip = ip_bintoip(ip_inttobin($int, $version),$version);
+                my $addresses = $self->{ipam}->getAddresses({vrf => $v->{name}, section => $s->{name}, subnet => "$ip/$mask", strict => 1});
+                my @noDNS;
+                foreach my $addr (@{$addresses}) {
+                    if(not $addr->{dns_name}) {
+                        my $ipv = length($addr->{ip_addr}) > 10 ? 6 : 4;
+                        my $t_ip = ip_bintoip(ip_inttobin($addr->{ip_addr}, $ipv), $ipv);
+                        push(@noDNS, $t_ip);
+                    }
+                }
+                $ret->{$v_name}->{$s->{name}}->{"$ip/$mask"} = \@noDNS if @noDNS > 0;
+            }
+        }
+    }
+
+    return $ret;
 }
 1;
 __END__
