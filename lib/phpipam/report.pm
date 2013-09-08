@@ -87,6 +87,11 @@ sub new {
     return $self;
 }
 
+sub DESTROY {
+
+    return 0;
+}
+
 sub _arg {
     my $self = shift;
     my $arg = shift;
