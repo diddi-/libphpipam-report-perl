@@ -293,15 +293,16 @@ sub getDHCP {
     return undef;
 }
 
-=head2 getNoDNS(%opts)
+=head2 getNoData(%opts)
 
-Get all IP addresses within a VRF, section or subnet that does not have a DNS name
-associated with it.
+Get all IP addresses within a VRF, section or subnet that does not have a value for the
+required data column.
+This is useful if you have custom data fields that are mandatory in your phpIPAM installation.
 By default returns all addresses in all VRFs, sections and subnets if no options are given.
 
-    $reporter->getNoDNS("servers", "10.0.0.0/8");
+    $reporter->getNoData({data => 'owner', section => "servers", subnet => "10.0.0.0/8"});
 
-%options limit the scope for which addresses are searched, options are
+%opts limit the scope for which addresses are searched, options are
 
     section => string           - Section name as stored in the database.
                                   Section names are case sensitive.
@@ -313,12 +314,15 @@ By default returns all addresses in all VRFs, sections and subnets if no options
 
     vrf => [name|RD]            - Name or Route-Distinguisher of the VRF to search in.
 
-By default getNoDNS will return all addresses in all subnets that does not
-have any DNS name associated with it.
+    data => name                - A database column name in the ipaddresses table.
+                                  This can be any column, native or custom.
 
-    my $free = $reporter->getNoDNS({section => "Section1", subnet => "192.168.0.0/24"});
+By default getNoData will return all addresses in all subnets that does not
+have any a value set for the required data column.
 
-getNoDNS() will sort the subnets in VRF and Sections so you know what subnet you're
+    my $addresses = $reporter->getNoData({data => 'dns_name'});
+
+getNoData() will sort the subnets in VRF and Sections so you know what subnet you're
 currently looking at.
 An example structure will look something like this
 
@@ -343,16 +347,22 @@ An example structure will look something like this
 Note that subnets that do not belong to any VRFs are automatically put in the GLOBAL vrf.
 
 =cut
-sub getNoDNS {
+sub getNoData {
     my $self = shift;
     my $opts = shift;
     my $section = $opts->{'section'} ||= undef;
     my $vrf = $opts->{'vrf'} ||= undef;
     my $subnet = $opts->{'subnet'} ||= undef;
+    my $DataColumn = $opts->{'data'} ||= undef;
     my $netip = undef;
     my $ipam_vrf = undef;
     my $ipam_section = undef;
     my $ret = {};
+
+    if(not $DataColumn) {
+        carp("Missing mandatory argument 'data' to getNoData");
+        return undef;
+    }
 
     if($subnet) {
         $netip = Net::IP->new($subnet);
@@ -393,21 +403,45 @@ sub getNoDNS {
                 my $version = length($int) > 10 ? 6 : 4;
                 my $ip = ip_bintoip(ip_inttobin($int, $version),$version);
                 my $addresses = $self->{ipam}->getAddresses({vrf => $v->{name}, section => $s->{name}, subnet => "$ip/$mask", strict => 1});
-                my @noDNS;
+                my @noData;
                 foreach my $addr (@{$addresses}) {
-                    if(not $addr->{dns_name}) {
+                    if(not defined $addr->{$DataColumn}) {
+                        # We're checking for a column that does not exist
+                        carp("Checking for non-existent data column '$DataColumn'");
+                        return -1;
+                    }
+                    if(not $addr->{$DataColumn}) {
                         my $ipv = length($addr->{ip_addr}) > 10 ? 6 : 4;
                         my $t_ip = ip_bintoip(ip_inttobin($addr->{ip_addr}, $ipv), $ipv);
-                        push(@noDNS, $t_ip);
+                        push(@noData, $t_ip);
                     }
                 }
-                $ret->{$v_name}->{$s->{name}}->{"$ip/$mask"} = \@noDNS if @noDNS > 0;
+                $ret->{$v_name}->{$s->{name}}->{"$ip/$mask"} = \@noData if @noData > 0;
             }
         }
     }
 
     return $ret;
 }
+
+=head2 getNoDNS(%opts)
+
+This is just a wrapper method to getNoData() for easier access.
+Actually, getNoDNS() calls getNoData() like this
+
+    return $self->getNoData({data => 'dns_name', %opts});
+
+All options and return values are exactly the same as to getNoData().
+
+=cut
+sub getNoDNS {
+    my $self = shift;
+    my $opts = shift;
+
+    $opts->{'data'} = 'dns_name';
+    return $self->getNoData($opts);
+}
+
 1;
 __END__
 
