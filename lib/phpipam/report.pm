@@ -30,11 +30,10 @@ use Carp;
 use Net::IP qw (ip_bintoip ip_inttobin);
 
 use lib '/home/diddi/git/libphpipam-perl/lib';
-use phpipam;
-use Data::Dumper;
+require phpipam;
 require Exporter;
 
-our @ISA = qw(Exporter);
+our @ISA = qw(Exporter phpipam);
 
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
