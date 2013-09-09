@@ -46,7 +46,6 @@ use warnings;
 use Carp;
 use Net::IP qw (ip_bintoip ip_inttobin);
 
-use lib '/home/diddi/git/libphpipam-perl/lib';
 require phpipam;
 require Exporter;
 
