@@ -416,7 +416,7 @@ sub getNoData {
     foreach my $v (@{$ipam_vrf}) {
         my $v_name = $v->{name} ? $v->{name} : 'GLOBAL';
         foreach my $s (@{$ipam_section}) {
-            my $subnets = $self->{ipam}->getSubnets({vrf => $v->{name}, section => $s->{name}});
+            my $subnets = $self->{ipam}->getSubnets({vrf => $v->{name}, section => $s->{name}, strict => 1});
             foreach my $snet (@{$subnets}) {
                 # Turn that magical integer into a real subnet that we can work with.
                 my $int = $snet->{subnet};
